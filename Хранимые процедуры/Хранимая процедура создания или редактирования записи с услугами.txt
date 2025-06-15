@@ -1,0 +1,77 @@
+CREATE OR REPLACE PROCEDURE public.create_or_update_registration_with_services(
+	IN p_id_registration integer,
+	IN p_id_administrator integer,
+	IN p_id_client integer,
+	IN p_id_hairdresser integer,
+	IN p_date_registration timestamp without time zone,
+	IN p_id_services integer[])
+LANGUAGE 'plpgsql'
+AS $BODY$
+DECLARE
+    registration_id INTEGER;
+    i INTEGER;
+    total_duration INTERVAL;
+    end_time TIMESTAMP;
+    overlap_count INTEGER;
+BEGIN
+    -- Вычисление общей продолжительности услуг
+    SELECT SUM(s.duration)
+    INTO total_duration
+    FROM service s
+    WHERE s.id_service = ANY(p_id_services);
+
+    IF total_duration IS NULL THEN
+        RAISE EXCEPTION 'Нет ни одной добавленной услуги.';
+    END IF;
+
+    end_time := p_date_registration + total_duration;
+
+    -- Проверка на занятость парикмахера
+    SELECT COUNT(*)
+    INTO overlap_count
+    FROM registrationview rv
+    WHERE rv.id_hairdresser = p_id_hairdresser
+      AND (p_id_registration IS NULL OR rv.id_registration != p_id_registration)
+      AND (p_date_registration BETWEEN rv.date_registration AND rv.end_data
+         OR end_time           BETWEEN rv.date_registration AND rv.end_data
+         OR rv.date_registration BETWEEN p_date_registration AND end_time
+      );
+
+    IF overlap_count > 0 THEN
+        RAISE EXCEPTION 'Парикмахер занят в это время.';
+    END IF;
+
+    -- Вставка или обновление записи
+    IF p_id_registration IS NULL THEN
+        INSERT INTO registration (
+            id_administrator,
+            id_client,
+            id_hairdresser,
+            date_registration
+        ) VALUES (
+            p_id_administrator,
+            p_id_client,
+            p_id_hairdresser,
+            p_date_registration
+        )
+        RETURNING id_registration INTO registration_id;
+    ELSE
+        UPDATE registration
+        SET id_administrator = p_id_administrator,
+            id_client = p_id_client,
+            id_hairdresser = p_id_hairdresser,
+            date_registration = p_date_registration
+        WHERE id_registration = p_id_registration;
+
+        registration_id := p_id_registration;
+
+        DELETE FROM includes WHERE id_registration = registration_id;
+    END IF;
+
+    -- Добавление новых услуг
+    FOREACH i IN ARRAY p_id_services LOOP
+        INSERT INTO includes (id_registration, id_service)
+        VALUES (registration_id, i);
+    END LOOP;
+END;
+$BODY$;

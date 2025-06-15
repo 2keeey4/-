@@ -1,0 +1,42 @@
+CREATE OR REPLACE PROCEDURE public.authorize_user_proc(
+	IN p_email character varying,
+	IN p_password character varying,
+	OUT user_id integer,
+	OUT role integer)
+LANGUAGE 'plpgsql'
+AS $BODY$
+BEGIN
+    -- Поиск администратора
+    SELECT id_administrator INTO user_id
+    FROM administrator
+    WHERE email_administrator = p_email AND password_administrator = p_password;
+
+    IF FOUND THEN
+        role := 0;
+        RETURN;
+    END IF;
+
+    -- Поиск парикмахера
+    SELECT id_hairdresser INTO user_id
+    FROM hairdresser
+    WHERE email_hairdresser = p_email AND password_hairdresser = p_password;
+
+    IF FOUND THEN
+        role := 1;
+        RETURN;
+    END IF;
+
+    -- Поиск клиента
+    SELECT id_client INTO user_id
+    FROM client
+    WHERE email_client = p_email AND password_client = p_password;
+
+    IF FOUND THEN
+        role := 2;
+        RETURN;
+    END IF;
+
+    -- Если не найден ни один пользователь
+    user_id := NULL;
+    role := NULL;
+END;

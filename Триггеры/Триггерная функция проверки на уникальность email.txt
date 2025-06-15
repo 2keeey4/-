@@ -1,0 +1,48 @@
+CREATE OR REPLACE FUNCTION public.check_unique_email_across_roles()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+DECLARE
+    email_to_check VARCHAR;
+    user_id INTEGER;
+    user_role INTEGER; -- 0 = админ, 1 = парикмахер, 2 = клиент
+    conflict_found BOOLEAN := FALSE;
+BEGIN
+    -- Определяем email, роль и ID
+    IF TG_TABLE_NAME = 'administrator' THEN
+        email_to_check := NEW.email_administrator;
+        user_id := NEW.id_administrator;
+        user_role := 0;
+    ELSIF TG_TABLE_NAME = 'hairdresser' THEN
+        email_to_check := NEW.email_hairdresser;
+        user_id := NEW.id_hairdresser;
+        user_role := 1;
+    ELSIF TG_TABLE_NAME = 'client' THEN
+        email_to_check := NEW.email_client;
+        user_id := NEW.id_client;
+        user_role := 2;
+    ELSE
+        RAISE EXCEPTION 'Триггер вызван для неподдерживаемой таблицы: %', TG_TABLE_NAME;
+    END IF;
+
+    -- Проверка на совпадения по email
+    SELECT TRUE INTO conflict_found
+    FROM (
+        SELECT id_administrator AS id, 0 AS role FROM administrator WHERE email_administrator = email_to_check
+        UNION
+        SELECT id_hairdresser AS id, 1 AS role FROM hairdresser WHERE email_hairdresser = email_to_check
+        UNION
+        SELECT id_client AS id, 2 AS role FROM client WHERE email_client = email_to_check
+    ) AS all_users
+    WHERE NOT (id = user_id AND role = user_role)
+    LIMIT 1;
+
+    IF conflict_found THEN
+        RAISE EXCEPTION 'Email "%" уже используется другим пользователем', email_to_check;
+    END IF;
+
+    RETURN NEW;
+END;
+$BODY$;
